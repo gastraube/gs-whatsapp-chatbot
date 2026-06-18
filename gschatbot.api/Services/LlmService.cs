@@ -73,6 +73,7 @@ public class LlmService
         - Use o histórico para não repetir perguntas já respondidas.
         - Só defina intent=""agendar"" quando souber o tipo (especialidade ou medico) E o nome.
         - Se não souber o tipo/nome, pergunte e use intent=""agendar"" com dados.tipo=null.
+        - ""Dr X"", ""doutor X"", ""doutora X"", ""Dr. X"" sempre significa tipo=""medico"" com medico=""X"" (sem o prefixo Dr/doutor). Defina tipo=""medico"" mesmo que o nome não conste na lista de médicos disponíveis.
         {especialidadesBloco}
         {especialistasBloco}
         {historicoBloco}

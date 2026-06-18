@@ -24,20 +24,27 @@ public class AgendamentoHandler : IIntentHandler
         {
             var dados = llmResponse.Dados;
             var tipo = dados.ContainsKey("tipo") ? dados["tipo"]?.ToString() : null;
+            var medicoNome = dados.ContainsKey("medico") ? dados["medico"]?.ToString() : null;
+            var especialidadeNome = dados.ContainsKey("especialidade") ? dados["especialidade"]?.ToString() : null;
+
+            // LLM às vezes omite tipo mas preenche o nome — inferir pelo que veio preenchido
+            if (string.IsNullOrEmpty(tipo))
+            {
+                if (!string.IsNullOrEmpty(medicoNome)) tipo = "medico";
+                else if (!string.IsNullOrEmpty(especialidadeNome)) tipo = "especialidade";
+            }
 
             if (tipo == "especialidade")
             {
-                var especialidadeNome = dados.ContainsKey("especialidade") ? dados["especialidade"]?.ToString() : null;
                 await OfereceHorariosPorEspecialidade(clienteId, numeroWhatsApp, especialidadeNome);
             }
             else if (tipo == "medico")
             {
-                var medicoNome = dados.ContainsKey("medico") ? dados["medico"]?.ToString() : null;
                 await OfereceHorariosPorMedico(clienteId, numeroWhatsApp, medicoNome);
             }
             else
             {
-                // LLM pediu mais informações
+                // LLM ainda não tem dados suficientes — repassa a pergunta ao cliente
                 await _twilioService.SendMessage(numeroWhatsApp, llmResponse.Resposta);
             }
         }
@@ -69,6 +76,15 @@ public class AgendamentoHandler : IIntentHandler
 
             if (escolhido == null)
             {
+                if (PedindoMaisHorarios(mensagem) && !string.IsNullOrEmpty(ctx.TipoBusca))
+                {
+                    if (ctx.TipoBusca == "especialidade")
+                        await OfereceHorariosPorEspecialidade(clienteId, numeroWhatsApp, ctx.NomeBusca, ctx.Offset);
+                    else
+                        await OfereceHorariosPorMedico(clienteId, numeroWhatsApp, ctx.NomeBusca, ctx.Offset);
+                    return;
+                }
+
                 var linhas = ctx.Slots.Select(s => $"  {s.Index}. {s.EspecialistaNome} - {s.Data} às {s.Hora}");
                 var reenvio = "Desculpe, não entendi. Digite o número da opção desejada:\n\n" +
                               string.Join("\n", linhas);
@@ -135,7 +151,7 @@ public class AgendamentoHandler : IIntentHandler
         }
     }
 
-    private async Task OfereceHorariosPorEspecialidade(int clienteId, string numeroWhatsApp, string? especialidadeNome)
+    private async Task OfereceHorariosPorEspecialidade(int clienteId, string numeroWhatsApp, string? especialidadeNome, int offset = 0)
     {
         if (string.IsNullOrEmpty(especialidadeNome))
         {
@@ -152,37 +168,31 @@ public class AgendamentoHandler : IIntentHandler
             return;
         }
 
-        var especialistas = await _context.Especialistas
-            .Where(e => e.EspecialidadeId == especialidade.Id && e.Ativo)
-            .ToListAsync();
-
+        const int pageSize = 5;
         var hoje = DateOnly.FromDateTime(DateTime.Today);
-        var slotsComMedico = new List<(HorarioConsulta Slot, Especialista Especialista)>();
 
-        foreach (var especialista in especialistas)
+        var pagina = await (
+            from h in _context.HorariosConsulta
+            join e in _context.Especialistas on h.EspecialistaId equals e.Id
+            where e.EspecialidadeId == especialidade.Id && e.Ativo
+                  && h.Status == "disponivel" && h.DataConsulta >= hoje
+            orderby h.DataConsulta, h.HoraInicio
+            select new { Slot = h, Especialista = e }
+        ).Skip(offset).Take(pageSize + 1).ToListAsync();
+
+        var temMais = pagina.Count > pageSize;
+        var itens = pagina.Take(pageSize).ToList();
+
+        if (itens.Count == 0)
         {
-            var slot = await _context.HorariosConsulta
-                .Where(h => h.EspecialistaId == especialista.Id && h.Status == "disponivel" && h.DataConsulta >= hoje)
-                .OrderBy(h => h.DataConsulta).ThenBy(h => h.HoraInicio)
-                .FirstOrDefaultAsync();
-
-            if (slot != null)
-                slotsComMedico.Add((slot, especialista));
-        }
-
-        slotsComMedico = slotsComMedico
-            .OrderBy(x => x.Slot.DataConsulta).ThenBy(x => x.Slot.HoraInicio)
-            .Take(3)
-            .ToList();
-
-        if (slotsComMedico.Count == 0)
-        {
-            await _twilioService.SendMessage(numeroWhatsApp,
-                $"Não há horários disponíveis para {especialidade.Nome} no momento.");
+            var semHorario = offset == 0
+                ? $"Não há horários disponíveis para {especialidade.Nome} no momento."
+                : $"Não há mais horários disponíveis para {especialidade.Nome}.";
+            await _twilioService.SendMessage(numeroWhatsApp, semHorario);
             return;
         }
 
-        var slots = slotsComMedico.Select((x, i) => new SlotContexto
+        var slots = itens.Select((x, i) => new SlotContexto
         {
             Index = i + 1,
             SlotId = x.Slot.Id,
@@ -191,17 +201,20 @@ public class AgendamentoHandler : IIntentHandler
             Hora = x.Slot.HoraInicio.ToString("HH:mm")
         }).ToList();
 
-        await SalvarContextoSessao(clienteId, slots);
+        await SalvarContextoSessao(clienteId, slots, "especialidade", especialidade.Nome, offset + pageSize);
 
         var linhas = slots.Select(s => $"  {s.Index}. {s.EspecialistaNome} - {s.Data} às {s.Hora}");
-        var msg = $"Ótimo! Temos {slots.Count} opção(ões) de {especialidade.Nome}:\n\n" +
-                  string.Join("\n", linhas) +
-                  "\n\nQual prefere?";
+        var rodape = temMais
+            ? "\n\nQual prefere? (ou diga \"mais\" para ver outros horários)"
+            : "\n\nQual prefere?";
+        var cabecalho = offset == 0
+            ? $"Horários disponíveis de {especialidade.Nome}:\n\n"
+            : $"Próximos horários de {especialidade.Nome}:\n\n";
 
-        await _twilioService.SendMessage(numeroWhatsApp, msg);
+        await _twilioService.SendMessage(numeroWhatsApp, cabecalho + string.Join("\n", linhas) + rodape);
     }
 
-    private async Task OfereceHorariosPorMedico(int clienteId, string numeroWhatsApp, string? medicoNome)
+    private async Task OfereceHorariosPorMedico(int clienteId, string numeroWhatsApp, string? medicoNome, int offset = 0)
     {
         if (string.IsNullOrEmpty(medicoNome))
         {
@@ -214,21 +227,28 @@ public class AgendamentoHandler : IIntentHandler
 
         if (especialista == null)
         {
-            await _twilioService.SendMessage(numeroWhatsApp, $"Não encontrei o médico '{medicoNome}'. Por favor, verifique o nome.");
+            await _twilioService.SendMessage(numeroWhatsApp, $"Não encontrei nenhum médico chamado '{medicoNome}' em nossa clínica. Verifique o nome ou me diga a especialidade desejada.");
             return;
         }
 
+        const int pageSize = 5;
         var hoje = DateOnly.FromDateTime(DateTime.Today);
-        var horarios = await _context.HorariosConsulta
+
+        var pagina = await _context.HorariosConsulta
             .Where(h => h.EspecialistaId == especialista.Id && h.Status == "disponivel" && h.DataConsulta >= hoje)
             .OrderBy(h => h.DataConsulta).ThenBy(h => h.HoraInicio)
-            .Take(5)
+            .Skip(offset).Take(pageSize + 1)
             .ToListAsync();
+
+        var temMais = pagina.Count > pageSize;
+        var horarios = pagina.Take(pageSize).ToList();
 
         if (horarios.Count == 0)
         {
-            await _twilioService.SendMessage(numeroWhatsApp,
-                $"Não há horários disponíveis com {especialista.Nome} no momento.");
+            var semHorario = offset == 0
+                ? $"Não há horários disponíveis com {especialista.Nome} no momento."
+                : $"Não há mais horários disponíveis com {especialista.Nome}.";
+            await _twilioService.SendMessage(numeroWhatsApp, semHorario);
             return;
         }
 
@@ -241,17 +261,20 @@ public class AgendamentoHandler : IIntentHandler
             Hora = h.HoraInicio.ToString("HH:mm")
         }).ToList();
 
-        await SalvarContextoSessao(clienteId, slots);
+        await SalvarContextoSessao(clienteId, slots, "medico", especialista.Nome, offset + pageSize);
 
         var linhas = slots.Select(s => $"  {s.Index}. {s.Data} às {s.Hora}");
-        var msg = $"Horários disponíveis com {especialista.Nome}:\n\n" +
-                  string.Join("\n", linhas) +
-                  "\n\nQual prefere?";
+        var rodape = temMais
+            ? "\n\nQual prefere? (ou diga \"mais\" para ver outros horários)"
+            : "\n\nQual prefere?";
+        var cabecalho = offset == 0
+            ? $"Horários disponíveis com {especialista.Nome}:\n\n"
+            : $"Próximos horários com {especialista.Nome}:\n\n";
 
-        await _twilioService.SendMessage(numeroWhatsApp, msg);
+        await _twilioService.SendMessage(numeroWhatsApp, cabecalho + string.Join("\n", linhas) + rodape);
     }
 
-    private async Task SalvarContextoSessao(int clienteId, List<SlotContexto> slots)
+    private async Task SalvarContextoSessao(int clienteId, List<SlotContexto> slots, string tipoBusca, string nomeBusca, int proximoOffset)
     {
         var sessao = await _context.SessoesConversa
             .FirstOrDefaultAsync(s => s.ClienteId == clienteId);
@@ -259,10 +282,25 @@ public class AgendamentoHandler : IIntentHandler
         if (sessao != null)
         {
             sessao.EstadoAtual = "aguardando_escolha";
-            sessao.ContextoJson = JsonSerializer.Serialize(new ContextoEscolha { Slots = slots });
+            sessao.ContextoJson = JsonSerializer.Serialize(new ContextoEscolha
+            {
+                Slots = slots,
+                TipoBusca = tipoBusca,
+                NomeBusca = nomeBusca,
+                Offset = proximoOffset
+            });
             sessao.UltimaMensagemEm = DateTime.UtcNow;
             await _context.SaveChangesAsync();
         }
+    }
+
+    private static bool PedindoMaisHorarios(string mensagem)
+    {
+        var lower = mensagem.ToLower();
+        return lower.Contains("mais") || lower.Contains("outro") ||
+               lower.Contains("próximo") || lower.Contains("proximo") ||
+               lower.Contains("só tem") || lower.Contains("so tem") ||
+               lower.Contains("tem mais") || lower.Contains("ver mais");
     }
 
     private static SlotContexto? ResolverEscolha(string mensagem, List<SlotContexto> slots)
@@ -306,5 +344,8 @@ public class AgendamentoHandler : IIntentHandler
     private class ContextoEscolha
     {
         public List<SlotContexto> Slots { get; set; } = [];
+        public string TipoBusca { get; set; } = "";
+        public string NomeBusca { get; set; } = "";
+        public int Offset { get; set; }
     }
 }

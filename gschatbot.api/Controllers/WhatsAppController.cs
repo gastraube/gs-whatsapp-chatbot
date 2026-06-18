@@ -1,9 +1,7 @@
-using gschatbot.api.Data;
+using gschatbot.api.Domain.Interfaces;
 using gschatbot.api.Models;
-using gschatbot.api.Services;
 using gschatbot.api.Services.Handlers;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.EntityFrameworkCore;
 
 namespace gschatbot.api.Controllers;
 
@@ -11,96 +9,112 @@ namespace gschatbot.api.Controllers;
 [Route("api/whatsapp")]
 public class WhatsAppController : ControllerBase
 {
-    private readonly LlmService _llmService;
-    private readonly TwilioService _twilioService;
+    private readonly ILlmService _llmService;
+    private readonly INotificacaoService _notificacao;
+    private readonly IClienteRepository _clienteRepo;
+    private readonly IEspecialidadeRepository _especialidadeRepo;
+    private readonly IEspecialistaRepository _especialistaRepo;
+    private readonly IHistoricoMensagemRepository _historicoRepo;
+    private readonly ISessaoConversaRepository _sessaoRepo;
     private readonly IntentDispatcher _intentDispatcher;
-    private readonly AgendamentoHandler _agendamentoHandler;
-    private readonly AppDbContext _context;
+    private readonly IAgendamentoHandler _agendamentoHandler;
+    private readonly ILogger<WhatsAppController> _logger;
 
     public WhatsAppController(
-        LlmService llmService,
-        TwilioService twilioService,
+        ILlmService llmService,
+        INotificacaoService notificacao,
+        IClienteRepository clienteRepo,
+        IEspecialidadeRepository especialidadeRepo,
+        IEspecialistaRepository especialistaRepo,
+        IHistoricoMensagemRepository historicoRepo,
+        ISessaoConversaRepository sessaoRepo,
         IntentDispatcher intentDispatcher,
-        AgendamentoHandler agendamentoHandler,
-        AppDbContext context)
+        IAgendamentoHandler agendamentoHandler,
+        ILogger<WhatsAppController> logger)
     {
         _llmService = llmService;
-        _twilioService = twilioService;
+        _notificacao = notificacao;
+        _clienteRepo = clienteRepo;
+        _especialidadeRepo = especialidadeRepo;
+        _especialistaRepo = especialistaRepo;
+        _historicoRepo = historicoRepo;
+        _sessaoRepo = sessaoRepo;
         _intentDispatcher = intentDispatcher;
         _agendamentoHandler = agendamentoHandler;
-        _context = context;
+        _logger = logger;
     }
 
     [HttpPost("webhook")]
-    public async Task<IActionResult> ReceiveMessage([FromForm] IFormCollection form)
+    public async Task<IActionResult> ReceberMensagem([FromForm] IFormCollection form)
     {
         try
         {
             var fromNumber = form["From"].ToString();
             var messageBody = form["Body"].ToString();
 
-            Console.WriteLine($"[WhatsAppController] Recebido de {fromNumber}: {messageBody}");
+            _logger.LogInformation("[WhatsAppController] Recebido de {From}: {Body}", fromNumber, messageBody);
 
             var numeroLimpo = fromNumber.Replace("whatsapp:", "").Replace("+", "").Replace(" ", "");
-            var cliente = await _twilioService.GetOrCreateCliente(numeroLimpo);
-
-            // Verifica se está aguardando uma escolha da lista (bypass do LLM)
-            var sessao = await _context.SessoesConversa
-                .FirstOrDefaultAsync(s => s.ClienteId == cliente.Id);
+            var cliente = await _clienteRepo.ObterOuCriarAsync(numeroLimpo);
+            var sessao = await _sessaoRepo.BuscarPorClienteAsync(cliente.Id);
 
             if (sessao?.EstadoAtual == "aguardando_escolha")
             {
-                await _twilioService.SaveHistoricoMensagem(cliente.Id, null, "cliente", messageBody);
-                await _agendamentoHandler.ProcessarEscolha(cliente.Id, numeroLimpo, messageBody, sessao);
+                await _historicoRepo.AdicionarAsync(new HistoricoMensagem
+                {
+                    ClienteId = cliente.Id,
+                    RemetenteId = "cliente",
+                    Mensagem = messageBody,
+                    Tipo = "texto"
+                });
+                await _agendamentoHandler.ProcessarEscolhaAsync(cliente.Id, numeroLimpo, messageBody, sessao);
                 return Ok();
             }
 
-            // Fluxo normal via LLM
-            var historico = await _context.HistoricoMensagens
-                .Where(h => h.ClienteId == cliente.Id)
-                .OrderByDescending(h => h.CreatedAt)
-                .Take(10)
-                .OrderBy(h => h.CreatedAt)
-                .Select(h => new { h.RemetenteId, h.Mensagem })
-                .ToListAsync();
-
+            var historico = await _historicoRepo.ListarRecentesAsync(cliente.Id, 10);
             var historicoTuples = historico
                 .Select(h => (h.RemetenteId == "cliente" ? "Cliente" : "Bot", h.Mensagem))
                 .ToList();
 
-            var especialidades = await _context.Especialidades
-                .Select(e => e.Nome)
-                .ToListAsync();
+            var especialidades = await _especialidadeRepo.ListarNomesAsync();
+            var especialistas = await _especialistaRepo.ListarNomesAtivosAsync();
 
-            var especialistas = await _context.Especialistas
-                .Where(e => e.Ativo)
-                .Select(e => e.Nome)
-                .ToListAsync();
+            var llmResponse = await _llmService.ProcessarMensagemAsync(messageBody, historicoTuples, especialidades, especialistas);
 
-            var llmResponse = await _llmService.ProcessMessage(messageBody, historicoTuples, especialidades, especialistas);
-
-            await _twilioService.SaveHistoricoMensagem(cliente.Id, null, "cliente", messageBody);
+            await _historicoRepo.AdicionarAsync(new HistoricoMensagem
+            {
+                ClienteId = cliente.Id,
+                RemetenteId = "cliente",
+                Mensagem = messageBody,
+                Tipo = "texto"
+            });
 
             if (sessao != null)
             {
                 sessao.EstadoAtual = llmResponse.Intent;
                 sessao.UltimaMensagemEm = DateTime.UtcNow;
-                await _context.SaveChangesAsync();
+                await _sessaoRepo.AtualizarAsync(sessao);
             }
 
             var handled = await _intentDispatcher.Dispatch(cliente.Id, numeroLimpo, llmResponse);
 
             if (!handled)
             {
-                await _twilioService.SendMessage(numeroLimpo, llmResponse.Resposta);
-                await _twilioService.SaveHistoricoMensagem(cliente.Id, null, "bot", llmResponse.Resposta);
+                await _notificacao.EnviarMensagemAsync(numeroLimpo, llmResponse.Resposta);
+                await _historicoRepo.AdicionarAsync(new HistoricoMensagem
+                {
+                    ClienteId = cliente.Id,
+                    RemetenteId = "bot",
+                    Mensagem = llmResponse.Resposta,
+                    Tipo = "texto"
+                });
             }
 
             return Ok();
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"[WhatsAppController] Erro: {ex.Message}");
+            _logger.LogError(ex, "[WhatsAppController] Erro ao processar mensagem");
             return Ok();
         }
     }
@@ -111,21 +125,14 @@ public class WhatsAppController : ControllerBase
     [HttpGet("clientes")]
     public async Task<IActionResult> ListarClientes()
     {
-        var clientes = await _context.Clientes
-            .Include(c => c.Agendamentos)
-            .ToListAsync();
-
+        var clientes = await _clienteRepo.ListarComAgendamentosAsync();
         return Ok(clientes);
     }
 
     [HttpGet("clientes/{id}/historico")]
     public async Task<IActionResult> HistoricoCliente(int id)
     {
-        var historico = await _context.HistoricoMensagens
-            .Where(h => h.ClienteId == id)
-            .OrderByDescending(h => h.CreatedAt)
-            .ToListAsync();
-
+        var historico = await _historicoRepo.ListarPorClienteAsync(id);
         return Ok(historico);
     }
 }

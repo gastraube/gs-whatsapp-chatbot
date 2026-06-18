@@ -32,12 +32,12 @@ public class IntentDispatcher
         }
     }
 
-    public async Task Dispatch(int clienteId, string numeroWhatsApp, LlmResponse llmResponse)
+    public async Task<bool> Dispatch(int clienteId, string numeroWhatsApp, LlmResponse llmResponse)
     {
         if (llmResponse?.Intent == null)
         {
             Console.WriteLine("[IntentDispatcher] Intent nulo");
-            return;
+            return false;
         }
 
         var key = llmResponse.Intent.ToLower().Trim();
@@ -49,15 +49,16 @@ public class IntentDispatcher
                 var handler = (IIntentHandler)_serviceProvider.GetService(handlerType);
                 await handler.Handle(clienteId, numeroWhatsApp, llmResponse);
                 Console.WriteLine($"[IntentDispatcher] Executado: {key}");
+                return true;
             }
             catch (Exception ex)
             {
                 Console.WriteLine($"[IntentDispatcher] Erro ao executar {key}: {ex.Message}");
+                return false;
             }
         }
-        else
-        {
-            Console.WriteLine($"[IntentDispatcher] Intent não encontrado: {key}");
-        }
+
+        Console.WriteLine($"[IntentDispatcher] Sem handler para: {key}");
+        return false;
     }
 }

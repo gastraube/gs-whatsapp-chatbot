@@ -3,6 +3,8 @@ using System.Text.Json;
 
 namespace gschatbot.api.Services;
 
+// Responsável por toda comunicação com o modelo de linguagem local (Ollama).
+// Fluxo: monta o prompt → chama a API do Ollama → faz parse do JSON retornado → devolve LlmResponse.
 public class LlmService
 {
     private readonly HttpClient _httpClient;
@@ -14,131 +16,123 @@ public class LlmService
         _config = config;
     }
 
-    public async Task<LlmResponse> ProcessMessage(string userMessage, List<(string role, string message)>? historico = null, List<string>? especialidades = null)
+    // Ponto de entrada principal. Recebe a mensagem do cliente e contextos opcionais
+    // (histórico da conversa, listas de especialidades e médicos para o LLM normalizar nomes)
+    // e devolve a intenção detectada + dados estruturados.
+    public async Task<LlmResponse> ProcessMessage(
+        string userMessage,
+        List<(string role, string message)>? historico = null,
+        List<string>? especialidades = null,
+        List<string>? especialistas = null)
     {
         try
         {
-            var ollamaUrl = _config["Ollama:Url"] ?? "http://localhost:11434";
-            var model = _config["Ollama:Model"] ?? "mistral";
-
-            var historicoTexto = "";
-            if (historico != null && historico.Count > 0)
-            {
-                historicoTexto = "\n\n--- Histórico recente desta conversa com o cliente ---\n" +
-                    string.Join("\n", historico.Select(h => $"{h.role}: {h.message}")) +
-                    "\n--- Fim do histórico ---\n";
-            }
-
-            var especialidadesTexto = especialidades != null && especialidades.Count > 0
-                ? $"\nEspecialidades disponíveis na clínica (use exatamente este nome no campo especialidade): {string.Join(", ", especialidades)}\n"
-                : "";
-
-            var prompt = $@"Você é um assistente de agendamento de clínica médica.
-
-Instruções:
-- Se o cliente quiser agendar mas não informar todos os dados (especialidade, data e hora), pergunte o que falta de forma conversacional.
-- Use o histórico abaixo para entender o contexto da conversa e não repetir perguntas já respondidas.
-- Só defina intent ""agendar"" quando os 3 dados estiverem presentes: especialidade, data e hora.
-- Para especialidade, use EXATAMENTE um dos nomes listados abaixo.
-{especialidadesTexto}{historicoTexto}
-Responda APENAS com um objeto JSON válido contendo exatamente estes 3 campos:
-
-1. ""intent"": uma das opções: ""agendar"", ""duvida"", ""saudacao"" ou ""cancelar""
-2. ""resposta"": texto em português para enviar ao cliente
-3. ""dados"": objeto com ""especialidade"", ""data"" (DD/MM/YYYY) e ""hora"" (HH:MM), ou null se não informado
-
-Exemplo de saída:
-{{""intent"":""agendar"",""resposta"":""Agendamento confirmado!"",""dados"":{{""especialidade"":""cardiologista"",""data"":""25/06/2026"",""hora"":""14:00""}}}}
-
-Mensagem atual do cliente: {userMessage}";
-
-            var requestBody = new
-            {
-                model = model,
-                prompt = prompt,
-                stream = false,
-                format = "json"
-            };
-
-            var content = new StringContent(
-                JsonSerializer.Serialize(requestBody),
-                System.Text.Encoding.UTF8,
-                "application/json"
-            );
-
-            var response = await _httpClient.PostAsync($"{ollamaUrl}/api/generate", content);
-            var responseText = await response.Content.ReadAsStringAsync();
-
-            using var doc = JsonDocument.Parse(responseText);
-            var responseContent = doc.RootElement.GetProperty("response").GetString();
-
-            // Extrai JSON da resposta
-            var jsonStart = responseContent.IndexOf('{');
-            var jsonEnd = responseContent.LastIndexOf('}') + 1;
-
-            if (jsonStart >= 0 && jsonEnd > jsonStart)
-            {
-                var jsonString = responseContent.Substring(jsonStart, jsonEnd - jsonStart);
-
-                JsonDocument jsonDoc;
-                try
-                {
-                    jsonDoc = JsonDocument.Parse(jsonString);
-                }
-                catch (JsonException)
-                {
-                    // Mistral às vezes gera JSON duplamente escapado: \" → ", \r\n → remove
-                    var cleaned = jsonString
-                        .Replace("\\\"", "\"")
-                        .Replace("\\r\\n", "")
-                        .Replace("\\r", "")
-                        .Replace("\\n", "")
-                        .Replace("\\t", " ");
-                    jsonDoc = JsonDocument.Parse(cleaned);
-                }
-
-                var root = jsonDoc.RootElement;
-
-                var intent = root.TryGetProperty("intent", out var intentEl)
-                    ? intentEl.GetString() ?? "duvida"
-                    : "duvida";
-
-                var resposta = root.TryGetProperty("resposta", out var respostaEl)
-                    ? respostaEl.GetString() ?? "Desculpe, não entendi."
-                    : "Desculpe, não entendi.";
-
-                // Aceita tanto {"dados": {...}} quanto campos flat na raiz
-                Dictionary<string, object> dados;
-                if (root.TryGetProperty("dados", out var dadosEl) && dadosEl.ValueKind == JsonValueKind.Object)
-                {
-                    dados = JsonSerializer.Deserialize<Dictionary<string, object>>(dadosEl.GetRawText()) ?? [];
-                }
-                else
-                {
-                    dados = [];
-                    foreach (var field in new[] { "especialidade", "data", "hora" })
-                        if (root.TryGetProperty(field, out var fieldEl) && fieldEl.ValueKind != JsonValueKind.Null)
-                            dados[field] = fieldEl.GetString() ?? "";
-
-                    // Se tem dados de agendamento mas intent veio errado, corrige
-                    if (dados.Count > 0 && intent == "duvida")
-                        intent = "agendar";
-                }
-
-                return new LlmResponse
-                {
-                    Intent = intent,
-                    Resposta = resposta,
-                    Dados = dados
-                };
-            }
-
-            return new LlmResponse { Intent = "duvida", Resposta = "Desculpe, houve um erro ao processar." };
+            var prompt = BuildPrompt(userMessage, historico, especialidades, especialistas);
+            var json = await CallOllama(prompt);
+            return ParseResponse(json);
         }
         catch (Exception ex)
         {
             Console.WriteLine($"[LlmService] Erro: {ex.Message}");
             return new LlmResponse { Intent = "erro", Resposta = "Erro ao processar mensagem." };
         }
+    }
+
+    // Monta o prompt enviado ao modelo.
+    // Injeta dinamicamente: histórico da conversa, especialidades e médicos cadastrados.
+    // O modelo deve responder SEMPRE em JSON com os campos: intent, resposta e dados.
+    // Não pedimos data/hora aqui — os horários disponíveis são buscados no banco pelo AgendamentoHandler.
+    private static string BuildPrompt(
+        string userMessage,
+        List<(string role, string message)>? historico,
+        List<string>? especialidades,
+        List<string>? especialistas)
+    {
+        // Bloco de histórico — incluído só quando existe, para economizar tokens
+        var historicoBloco = historico?.Count > 0
+            ? "\n\n--- Histórico recente ---\n" +
+              string.Join("\n", historico.Select(h => $"{h.role}: {h.message}")) +
+              "\n--- Fim ---\n"
+            : "";
+
+        // Listas enviadas para que o modelo use exatamente os nomes cadastrados no banco,
+        // evitando variações como "Cardio" em vez de "Cardiologia".
+        var especialidadesBloco = especialidades?.Count > 0
+            ? $"\nEspecialidades disponíveis (use exatamente este nome): {string.Join(", ", especialidades)}"
+            : "";
+
+        var especialistasBloco = especialistas?.Count > 0
+            ? $"\nMédicos disponíveis (use exatamente este nome): {string.Join(", ", especialistas)}"
+            : "";
+
+        return $@"Você é um assistente de agendamento de clínica médica.
+
+        Instruções:
+        - Quando o cliente quiser agendar, descubra se ele prefere uma especialidade ou um médico específico.
+        - NUNCA pergunte data ou hora — o sistema busca os horários disponíveis automaticamente.
+        - Use o histórico para não repetir perguntas já respondidas.
+        - Só defina intent=""agendar"" quando souber o tipo (especialidade ou medico) E o nome.
+        - Se não souber o tipo/nome, pergunte e use intent=""agendar"" com dados.tipo=null.
+        {especialidadesBloco}
+        {especialistasBloco}
+        {historicoBloco}
+        Responda APENAS com JSON válido:
+        {{""intent"": ""agendar""|""duvida""|""saudacao""|""cancelar"", ""resposta"": ""..."", ""dados"": {{""tipo"": ""especialidade""|""medico""|null, ""especialidade"": ""...""|null, ""medico"": ""...""|null}}}}
+
+        Mensagem do cliente: {userMessage}";
+    }
+
+    // Chama a API de geração de texto do Ollama e retorna o conteúdo bruto da resposta.
+    // O Ollama envelopa a resposta do modelo dentro do campo "response" do JSON retornado.
+    private async Task<string> CallOllama(string prompt)
+    {
+        var ollamaUrl = _config["Ollama:Url"] ?? "http://localhost:11434";
+        var model = _config["Ollama:Model"] ?? "mistral";
+
+        var body = JsonSerializer.Serialize(new { model, prompt, stream = false, format = "json" });
+        var content = new StringContent(body, System.Text.Encoding.UTF8, "application/json");
+
+        var response = await _httpClient.PostAsync($"{ollamaUrl}/api/generate", content);
+        var text = await response.Content.ReadAsStringAsync();
+
+        // Extrai apenas o texto gerado pelo modelo, descartando os metadados do Ollama
+        using var doc = JsonDocument.Parse(text);
+        return doc.RootElement.GetProperty("response").GetString() ?? "";
+    }
+
+    // Faz parse do JSON gerado pelo modelo e retorna um LlmResponse tipado.
+    // O modelo às vezes adiciona texto antes/depois do JSON — por isso buscamos
+    // o primeiro '{' e o último '}' para extrair apenas o objeto JSON.
+    private static LlmResponse ParseResponse(string raw)
+    {
+        var start = raw.IndexOf('{');
+        var end = raw.LastIndexOf('}') + 1;
+
+        if (start < 0 || end <= start)
+            return new LlmResponse { Intent = "duvida", Resposta = "Desculpe, houve um erro ao processar." };
+
+        var jsonStr = raw[start..end];
+
+        JsonElement root;
+        try
+        {
+            root = JsonDocument.Parse(jsonStr).RootElement;
+        }
+        catch (JsonException)
+        {
+            // Mistral às vezes gera escapes duplos (\" em vez de ") — limpamos antes de tentar novamente
+            var cleaned = jsonStr.Replace("\\\"", "\"").Replace("\\r\\n", "").Replace("\\n", "").Replace("\\t", " ");
+            root = JsonDocument.Parse(cleaned).RootElement;
+        }
+
+        var intent = root.TryGetProperty("intent", out var i) ? i.GetString() ?? "duvida" : "duvida";
+        var resposta = root.TryGetProperty("resposta", out var r) ? r.GetString() ?? "Desculpe, não entendi." : "Desculpe, não entendi.";
+
+        // "dados" contém tipo + especialidade/medico quando intent = "agendar"
+        var dados = root.TryGetProperty("dados", out var d) && d.ValueKind == JsonValueKind.Object
+            ? JsonSerializer.Deserialize<Dictionary<string, object>>(d.GetRawText()) ?? []
+            : [];
+
+        return new LlmResponse { Intent = intent, Resposta = resposta, Dados = dados };
     }
 }

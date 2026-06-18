@@ -1,0 +1,30 @@
+## .NET
+bin/
+obj/
+*.user
+*.suo
+.vs/
+*.swp
+
+## Logs
+*.log
+logs/
+
+## User secrets / config local
+appsettings.json
+appsettings.Local.json
+**/Properties/launchSettings.json
+
+## NuGet
+*.nupkg
+.nuget/
+
+## Rider / JetBrains
+.idea/
+
+## VSCode
+.vscode/
+
+## OS
+.DS_Store
+Thumbs.db

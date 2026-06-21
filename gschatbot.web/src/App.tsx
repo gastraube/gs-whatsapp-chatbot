@@ -8,6 +8,7 @@ import Especialistas from './pages/Especialistas'
 import EspecialistasForm from './pages/EspecialistasForm'
 import Consultas from './pages/Consultas'
 import Clientes from './pages/Clientes'
+import ClientesForm from './pages/ClientesForm'
 
 export default function App() {
   return (
@@ -30,7 +31,10 @@ export default function App() {
               <Route path=":id/editar" element={<EspecialistasForm />} />
             </Route>
             <Route path="consultas" element={<Consultas />} />
-            <Route path="clientes" element={<Clientes />} />
+            <Route path="clientes">
+              <Route index element={<Clientes />} />
+              <Route path=":id/editar" element={<ClientesForm />} />
+            </Route>
           </Route>
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

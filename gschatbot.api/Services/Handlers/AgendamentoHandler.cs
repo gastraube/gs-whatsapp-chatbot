@@ -52,7 +52,10 @@ public class AgendamentoHandler : IIntentHandler
                 return;
             }
 
-            await EnviarESalvarAsync(clienteId, numeroWhatsApp, llmResponse.Resposta);
+            var resposta = string.IsNullOrWhiteSpace(llmResponse.Resposta)
+                ? "Diga o médico ou a especialidade que deseja para agendar uma consulta."
+                : llmResponse.Resposta;
+            await EnviarESalvarAsync(clienteId, numeroWhatsApp, resposta);
         }
         catch (Exception ex)
         {

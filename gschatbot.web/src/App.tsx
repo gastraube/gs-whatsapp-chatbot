@@ -5,6 +5,7 @@ import Layout from './components/Layout'
 import Login from './pages/Login'
 import Home from './pages/Home'
 import Especialistas from './pages/Especialistas'
+import EspecialistasForm from './pages/EspecialistasForm'
 import Consultas from './pages/Consultas'
 import Clientes from './pages/Clientes'
 
@@ -23,7 +24,11 @@ export default function App() {
             }
           >
             <Route index element={<Home />} />
-            <Route path="especialistas" element={<Especialistas />} />
+            <Route path="especialistas">
+              <Route index element={<Especialistas />} />
+              <Route path="novo" element={<EspecialistasForm />} />
+              <Route path=":id/editar" element={<EspecialistasForm />} />
+            </Route>
             <Route path="consultas" element={<Consultas />} />
             <Route path="clientes" element={<Clientes />} />
           </Route>

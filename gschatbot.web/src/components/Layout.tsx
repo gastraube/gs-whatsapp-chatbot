@@ -20,6 +20,9 @@ export default function Layout() {
         <main className="flex-1 overflow-auto px-4 py-6 md:px-14 md:py-12 bg-slate-50">
           <Outlet />
         </main>
+        <footer className="shrink-0 px-4 py-3 md:px-14 bg-slate-50 border-t border-slate-200 text-center text-xs text-slate-400">
+          © 2026 <span className="font-medium text-slate-500">straubetech</span>
+        </footer>
       </div>
     </div>
   );

@@ -54,10 +54,10 @@ public class ConfirmarHandler : IIntentHandler
 
             if (string.IsNullOrEmpty(medicoNome) || string.IsNullOrEmpty(dataStr) || string.IsNullOrEmpty(horaStr))
             {
-                var resposta = string.IsNullOrWhiteSpace(llmResponse.Resposta)
+                var respostaFallback = string.IsNullOrWhiteSpace(llmResponse.Resposta)
                     ? "Para agendar preciso saber o médico, a data e o horário. Qual horário você escolheu?"
                     : llmResponse.Resposta;
-                await EnviarESalvarAsync(clienteId, numeroWhatsApp, resposta);
+                await EnviarESalvarAsync(clienteId, numeroWhatsApp, respostaFallback);
                 return;
             }
 

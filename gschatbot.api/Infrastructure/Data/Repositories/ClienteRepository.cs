@@ -16,29 +16,18 @@ public class ClienteRepository : IClienteRepository
 
     public async Task<Cliente> ObterOuCriarAsync(string numeroWhatsApp)
     {
-        var cliente = await _context.Clientes
-            .FirstOrDefaultAsync(c => c.NumeroWhatsApp == numeroWhatsApp);
+        var clienteExistente = await _context.ClienteNumeros
+            .Where(cn => cn.Numero == numeroWhatsApp)
+            .Select(cn => cn.Cliente)
+            .FirstOrDefaultAsync();
 
-        if (cliente != null)
-            return cliente;
+        if (clienteExistente != null)
+            return clienteExistente;
 
-        cliente = new Cliente
-        {
-            NumeroWhatsApp = numeroWhatsApp,
-            Nome = "Cliente",
-            Ativo = true
-        };
+        var cliente = new Cliente { Ativo = true };
+        cliente.Numeros.Add(new ClienteNumero { Numero = numeroWhatsApp, Principal = true });
 
         _context.Clientes.Add(cliente);
-        await _context.SaveChangesAsync();
-
-        var sessao = new SessaoConversa
-        {
-            ClienteId = cliente.Id,
-            EstadoAtual = "inicial"
-        };
-
-        _context.SessoesConversa.Add(sessao);
         await _context.SaveChangesAsync();
 
         return cliente;
@@ -47,7 +36,15 @@ public class ClienteRepository : IClienteRepository
     public async Task<List<Cliente>> ListarComAgendamentosAsync()
     {
         return await _context.Clientes
+            .Include(c => c.Numeros)
             .Include(c => c.Agendamentos)
             .ToListAsync();
+    }
+
+    public async Task AtualizarDadosAsync(Cliente cliente)
+    {
+        cliente.UpdatedAt = DateTime.UtcNow;
+        _context.Clientes.Update(cliente);
+        await _context.SaveChangesAsync();
     }
 }

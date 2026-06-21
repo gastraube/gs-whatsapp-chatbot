@@ -12,6 +12,5 @@ public class Endereco
     public string CEP { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
-    public ICollection<EspecialistaEndereco> EspecialistasEnderecos { get; set; } = new List<EspecialistaEndereco>();
     public ICollection<HorarioConsulta> HorariosConsulta { get; set; } = new List<HorarioConsulta>();
 }

@@ -28,6 +28,13 @@ public class EspecialistaRepository : IEspecialistaRepository
             .ToListAsync();
     }
 
+    public async Task<List<Especialista>> ListarAtivosAsync()
+    {
+        return await _context.Especialistas
+            .Where(e => e.Ativo)
+            .ToListAsync();
+    }
+
     public async Task<List<Especialista>> ListarPorEspecialidadeAsync(int especialidadeId)
     {
         return await _context.Especialistas

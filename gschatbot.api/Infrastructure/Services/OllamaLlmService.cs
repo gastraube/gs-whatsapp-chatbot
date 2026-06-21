@@ -11,6 +11,7 @@ public class OllamaLlmService : ILlmService
     private readonly HttpClient _httpClient;
     private readonly OllamaOptions _options;
     private readonly ILogger<OllamaLlmService> _logger;
+    private readonly string _promptTemplate;
 
     public OllamaLlmService(
         HttpClient httpClient,
@@ -20,17 +21,23 @@ public class OllamaLlmService : ILlmService
         _httpClient = httpClient;
         _options = options.Value;
         _logger = logger;
+
+        var path = Path.Combine(AppContext.BaseDirectory, "Prompts", "chatbot_prompt.txt");
+        _promptTemplate = File.ReadAllText(path);
     }
 
     public async Task<LlmResponse> ProcessarMensagemAsync(
         string mensagem,
         List<(string role, string texto)>? historico = null,
         List<string>? especialidades = null,
-        List<string>? especialistas = null)
+        List<string>? especialistas = null,
+        List<string>? planos = null,
+        List<string>? planosCliente = null,
+        Dictionary<string, List<string>>? metodosPagamentoPorEspecialista = null)
     {
         try
         {
-            var prompt = BuildPrompt(mensagem, historico, especialidades, especialistas);
+            var prompt = BuildPrompt(mensagem, historico, especialidades, especialistas, planos, planosCliente, metodosPagamentoPorEspecialista);
             var json = await CallOllamaAsync(prompt);
             return ParseResponse(json);
         }
@@ -41,42 +48,51 @@ public class OllamaLlmService : ILlmService
         }
     }
 
-    private static string BuildPrompt(
+    private string BuildPrompt(
         string mensagem,
         List<(string role, string texto)>? historico,
         List<string>? especialidades,
-        List<string>? especialistas)
+        List<string>? especialistas,
+        List<string>? planos,
+        List<string>? planosCliente,
+        Dictionary<string, List<string>>? metodosPagamentoPorEspecialista)
     {
         var historicoBloco = historico?.Count > 0
-            ? "\n\n--- Histórico recente ---\n" +
+            ? "\n--- Histórico recente ---\n" +
               string.Join("\n", historico.Select(h => $"{h.role}: {h.texto}")) +
-              "\n--- Fim ---\n"
+              "\n--- Fim ---"
             : "";
 
         var especialidadesBloco = especialidades?.Count > 0
-            ? $"\nEspecialidades disponíveis (use exatamente este nome): {string.Join(", ", especialidades)}"
+            ? $"Especialidades disponíveis (use exatamente este nome): {string.Join(", ", especialidades)}"
             : "";
 
         var especialistasBloco = especialistas?.Count > 0
-            ? $"\nMédicos disponíveis (use exatamente este nome): {string.Join(", ", especialistas)}"
+            ? $"Médicos disponíveis (use exatamente este nome): {string.Join(", ", especialistas)}"
             : "";
 
-        return $@"Você é um assistente de agendamento de clínica médica.
+        var planosBloco = planos?.Count > 0
+            ? $"Planos de saúde aceitos na clínica: {string.Join(", ", planos)}"
+            : "";
 
-        Instruções:
-        - Quando o cliente quiser agendar, descubra se ele prefere uma especialidade ou um médico específico.
-        - NUNCA pergunte data ou hora — o sistema busca os horários disponíveis automaticamente.
-        - Use o histórico para não repetir perguntas já respondidas.
-        - Só defina intent=""agendar"" quando souber o tipo (especialidade ou medico) E o nome.
-        - Se não souber o tipo/nome, pergunte e use intent=""agendar"" com dados.tipo=null.
-        - ""Dr X"", ""doutor X"", ""doutora X"", ""Dr. X"" sempre significa tipo=""medico"" com medico=""X"" (sem o prefixo Dr/doutor). Defina tipo=""medico"" mesmo que o nome não conste na lista de médicos disponíveis.
-        {especialidadesBloco}
-        {especialistasBloco}
-        {historicoBloco}
-        Responda APENAS com JSON válido:
-        {{""intent"": ""agendar""|""duvida""|""saudacao""|""cancelar"", ""resposta"": ""..."", ""dados"": {{""tipo"": ""especialidade""|""medico""|null, ""especialidade"": ""...""|null, ""medico"": ""...""|null}}}}
+        var planosClienteBloco = planosCliente?.Count > 0
+            ? $"Planos de saúde do cliente: {string.Join(", ", planosCliente)}"
+            : "";
 
-        Mensagem do cliente: {mensagem}";
+        var metodosPagamentoBloco = metodosPagamentoPorEspecialista?.Count > 0
+            ? "Métodos de pagamento por médico:\n" +
+              string.Join("\n", metodosPagamentoPorEspecialista.Select(kv =>
+                  $"  {kv.Key}: {string.Join(", ", kv.Value)}"))
+            : "";
+
+        return _promptTemplate
+            .Replace("{{ESPECIALIDADES}}", especialidadesBloco)
+            .Replace("{{ESPECIALISTAS}}", especialistasBloco)
+            .Replace("{{PLANOS}}", planosBloco)
+            .Replace("{{PLANOS_CLIENTE}}", planosClienteBloco)
+            .Replace("{{METODOS_PAGAMENTO}}", metodosPagamentoBloco)
+            .Replace("{{HISTORICO}}", historicoBloco)
+            .Replace("{{MENSAGEM}}", mensagem);
     }
 
     private async Task<string> CallOllamaAsync(string prompt)

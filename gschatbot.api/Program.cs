@@ -4,7 +4,10 @@ using gschatbot.api.Domain.Interfaces;
 using gschatbot.api.Infrastructure.Data.Repositories;
 using gschatbot.api.Infrastructure.Services;
 using gschatbot.api.Services.Handlers;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.IdentityModel.Tokens;
+using System.Text;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -17,6 +20,28 @@ builder.Services.Configure<OllamaOptions>(
 
 builder.Services.Configure<TwilioOptions>(
     builder.Configuration.GetSection(TwilioOptions.Section));
+
+builder.Services.Configure<JwtOptions>(
+    builder.Configuration.GetSection(JwtOptions.Section));
+
+// JWT Authentication
+var jwtSection = builder.Configuration.GetSection(JwtOptions.Section);
+var secretKey = jwtSection["SecretKey"]!;
+
+builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+    .AddJwtBearer(options =>
+    {
+        options.TokenValidationParameters = new TokenValidationParameters
+        {
+            ValidateIssuer = true,
+            ValidateAudience = true,
+            ValidateLifetime = true,
+            ValidateIssuerSigningKey = true,
+            ValidIssuer = jwtSection["Issuer"],
+            ValidAudience = jwtSection["Audience"],
+            IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(secretKey))
+        };
+    });
 
 // DbContext
 var connectionString = builder.Configuration.GetConnectionString("DefaultConnection");
@@ -37,7 +62,9 @@ builder.Services.AddScoped<IEspecialidadeRepository, EspecialidadeRepository>();
 builder.Services.AddScoped<IHorarioConsultaRepository, HorarioConsultaRepository>();
 builder.Services.AddScoped<IAgendamentoRepository, AgendamentoRepository>();
 builder.Services.AddScoped<IHistoricoMensagemRepository, HistoricoMensagemRepository>();
-builder.Services.AddScoped<ISessaoConversaRepository, SessaoConversaRepository>();
+builder.Services.AddScoped<IPlanoAssistenciaRepository, PlanoAssistenciaRepository>();
+builder.Services.AddScoped<IMetodoPagamentoRepository, MetodoPagamentoRepository>();
+builder.Services.AddScoped<IUsuarioRepository, UsuarioRepository>();
 
 // Dispatcher de intents
 builder.Services.AddScoped<IntentDispatcher>();
@@ -52,10 +79,6 @@ foreach (var handler in handlers)
 {
     builder.Services.AddScoped(handler);
 }
-
-// Registra IAgendamentoHandler resolvendo pela implementação concreta já registrada
-builder.Services.AddScoped<IAgendamentoHandler>(
-    sp => sp.GetRequiredService<AgendamentoHandler>());
 
 // Swagger
 builder.Services.AddEndpointsApiExplorer();
@@ -83,6 +106,7 @@ if (app.Environment.IsDevelopment())
 
 app.UseHttpsRedirection();
 app.UseCors("AllowAll");
+app.UseAuthentication();
 app.UseAuthorization();
 app.MapControllers();
 

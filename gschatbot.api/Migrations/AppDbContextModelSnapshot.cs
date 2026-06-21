@@ -45,9 +45,15 @@ namespace gschatbot.api.Migrations
                     b.Property<string>("NotasCliente")
                         .HasColumnType("longtext");
 
-                    b.Property<string>("Status")
+                    b.Property<int?>("PlanoAssistenciaId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("int");
+
+                    b.Property<string>("TipoPagamento")
                         .IsRequired()
-                        .HasColumnType("varchar(255)");
+                        .HasColumnType("longtext");
 
                     b.Property<DateTime>("UpdatedAt")
                         .HasColumnType("datetime(6)");
@@ -60,6 +66,8 @@ namespace gschatbot.api.Migrations
 
                     b.HasIndex("HorarioConsultaId")
                         .IsUnique();
+
+                    b.HasIndex("PlanoAssistenciaId");
 
                     b.HasIndex("Status");
 
@@ -77,6 +85,9 @@ namespace gschatbot.api.Migrations
                     b.Property<bool>("Ativo")
                         .HasColumnType("tinyint(1)");
 
+                    b.Property<string>("Cpf")
+                        .HasColumnType("varchar(255)");
+
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("datetime(6)");
 
@@ -87,14 +98,6 @@ namespace gschatbot.api.Migrations
                         .HasColumnType("longtext");
 
                     b.Property<string>("Nome")
-                        .IsRequired()
-                        .HasColumnType("longtext");
-
-                    b.Property<string>("NumeroWhatsApp")
-                        .IsRequired()
-                        .HasColumnType("varchar(255)");
-
-                    b.Property<string>("Telefone")
                         .HasColumnType("longtext");
 
                     b.Property<DateTime?>("UpdatedAt")
@@ -102,10 +105,59 @@ namespace gschatbot.api.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("NumeroWhatsApp")
+                    b.HasIndex("Cpf")
                         .IsUnique();
 
                     b.ToTable("Clientes");
+                });
+
+            modelBuilder.Entity("gschatbot.api.Models.ClienteNumero", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    MySqlPropertyBuilderExtensions.UseMySqlIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("ClienteId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<string>("Numero")
+                        .IsRequired()
+                        .HasColumnType("varchar(255)");
+
+                    b.Property<bool>("Principal")
+                        .HasColumnType("tinyint(1)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ClienteId");
+
+                    b.HasIndex("Numero")
+                        .IsUnique();
+
+                    b.ToTable("ClienteNumeros");
+                });
+
+            modelBuilder.Entity("gschatbot.api.Models.ClientePlano", b =>
+                {
+                    b.Property<int>("ClienteId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("PlanoAssistenciaId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("NumeroCarteirinha")
+                        .HasColumnType("longtext");
+
+                    b.HasKey("ClienteId", "PlanoAssistenciaId");
+
+                    b.HasIndex("PlanoAssistenciaId");
+
+                    b.ToTable("ClientePlanos");
                 });
 
             modelBuilder.Entity("gschatbot.api.Models.Endereco", b =>
@@ -216,33 +268,34 @@ namespace gschatbot.api.Migrations
                     b.ToTable("Especialistas");
                 });
 
-            modelBuilder.Entity("gschatbot.api.Models.EspecialistaEndereco", b =>
+            modelBuilder.Entity("gschatbot.api.Models.EspecialistaMetodoPagamento", b =>
                 {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("int");
-
-                    MySqlPropertyBuilderExtensions.UseMySqlIdentityColumn(b.Property<int>("Id"));
-
-                    b.Property<bool>("Ativo")
-                        .HasColumnType("tinyint(1)");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime(6)");
-
-                    b.Property<int>("EnderecoId")
-                        .HasColumnType("int");
-
                     b.Property<int>("EspecialistaId")
                         .HasColumnType("int");
 
-                    b.HasKey("Id");
+                    b.Property<int>("MetodoPagamentoId")
+                        .HasColumnType("int");
 
-                    b.HasIndex("EnderecoId");
+                    b.HasKey("EspecialistaId", "MetodoPagamentoId");
 
-                    b.HasIndex("EspecialistaId");
+                    b.HasIndex("MetodoPagamentoId");
 
-                    b.ToTable("EspecialistasEnderecos");
+                    b.ToTable("EspecialistaMetodosPagamento");
+                });
+
+            modelBuilder.Entity("gschatbot.api.Models.EspecialistaPlano", b =>
+                {
+                    b.Property<int>("EspecialistaId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("PlanoAssistenciaId")
+                        .HasColumnType("int");
+
+                    b.HasKey("EspecialistaId", "PlanoAssistenciaId");
+
+                    b.HasIndex("PlanoAssistenciaId");
+
+                    b.ToTable("EspecialistaPlanos");
                 });
 
             modelBuilder.Entity("gschatbot.api.Models.HistoricoMensagem", b =>
@@ -326,7 +379,7 @@ namespace gschatbot.api.Migrations
                     b.ToTable("HorariosConsulta");
                 });
 
-            modelBuilder.Entity("gschatbot.api.Models.SessaoConversa", b =>
+            modelBuilder.Entity("gschatbot.api.Models.MetodoPagamento", b =>
                 {
                     b.Property<int>("Id")
                         .ValueGeneratedOnAdd()
@@ -334,26 +387,68 @@ namespace gschatbot.api.Migrations
 
                     MySqlPropertyBuilderExtensions.UseMySqlIdentityColumn(b.Property<int>("Id"));
 
-                    b.Property<int>("ClienteId")
-                        .HasColumnType("int");
-
-                    b.Property<string>("ContextoJson")
+                    b.Property<string>("Nome")
                         .IsRequired()
                         .HasColumnType("longtext");
-
-                    b.Property<string>("EstadoAtual")
-                        .IsRequired()
-                        .HasColumnType("longtext");
-
-                    b.Property<DateTime>("UltimaMensagemEm")
-                        .HasColumnType("datetime(6)");
 
                     b.HasKey("Id");
 
-                    b.HasIndex("ClienteId")
-                        .IsUnique();
+                    b.ToTable("MetodosPagamento");
+                });
 
-                    b.ToTable("SessoesConversa");
+            modelBuilder.Entity("gschatbot.api.Models.PlanoAssistencia", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    MySqlPropertyBuilderExtensions.UseMySqlIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<bool>("Ativo")
+                        .HasColumnType("tinyint(1)");
+
+                    b.Property<string>("Nome")
+                        .IsRequired()
+                        .HasColumnType("longtext");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("PlanosAssistencia");
+                });
+
+            modelBuilder.Entity("gschatbot.api.Models.Usuario", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    MySqlPropertyBuilderExtensions.UseMySqlIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<bool>("Ativo")
+                        .HasColumnType("tinyint(1)");
+
+                    b.Property<DateTime>("CriadoEm")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<string>("Email")
+                        .IsRequired()
+                        .HasColumnType("longtext");
+
+                    b.Property<string>("Nome")
+                        .IsRequired()
+                        .HasColumnType("longtext");
+
+                    b.Property<string>("Role")
+                        .IsRequired()
+                        .HasColumnType("longtext");
+
+                    b.Property<string>("SenhaHash")
+                        .IsRequired()
+                        .HasColumnType("longtext");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("Usuarios");
                 });
 
             modelBuilder.Entity("gschatbot.api.Models.Agendamento", b =>
@@ -376,11 +471,48 @@ namespace gschatbot.api.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
+                    b.HasOne("gschatbot.api.Models.PlanoAssistencia", "PlanoAssistencia")
+                        .WithMany()
+                        .HasForeignKey("PlanoAssistenciaId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.Navigation("Cliente");
 
                     b.Navigation("Especialista");
 
                     b.Navigation("HorarioConsulta");
+
+                    b.Navigation("PlanoAssistencia");
+                });
+
+            modelBuilder.Entity("gschatbot.api.Models.ClienteNumero", b =>
+                {
+                    b.HasOne("gschatbot.api.Models.Cliente", "Cliente")
+                        .WithMany("Numeros")
+                        .HasForeignKey("ClienteId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Cliente");
+                });
+
+            modelBuilder.Entity("gschatbot.api.Models.ClientePlano", b =>
+                {
+                    b.HasOne("gschatbot.api.Models.Cliente", "Cliente")
+                        .WithMany("Planos")
+                        .HasForeignKey("ClienteId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("gschatbot.api.Models.PlanoAssistencia", "PlanoAssistencia")
+                        .WithMany("Clientes")
+                        .HasForeignKey("PlanoAssistenciaId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Cliente");
+
+                    b.Navigation("PlanoAssistencia");
                 });
 
             modelBuilder.Entity("gschatbot.api.Models.Especialista", b =>
@@ -394,23 +526,42 @@ namespace gschatbot.api.Migrations
                     b.Navigation("Especialidade");
                 });
 
-            modelBuilder.Entity("gschatbot.api.Models.EspecialistaEndereco", b =>
+            modelBuilder.Entity("gschatbot.api.Models.EspecialistaMetodoPagamento", b =>
                 {
-                    b.HasOne("gschatbot.api.Models.Endereco", "Endereco")
-                        .WithMany("EspecialistasEnderecos")
-                        .HasForeignKey("EnderecoId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
                     b.HasOne("gschatbot.api.Models.Especialista", "Especialista")
-                        .WithMany("EspecialistasEnderecos")
+                        .WithMany("MetodosPagamento")
                         .HasForeignKey("EspecialistaId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
-                    b.Navigation("Endereco");
+                    b.HasOne("gschatbot.api.Models.MetodoPagamento", "MetodoPagamento")
+                        .WithMany("Especialistas")
+                        .HasForeignKey("MetodoPagamentoId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
 
                     b.Navigation("Especialista");
+
+                    b.Navigation("MetodoPagamento");
+                });
+
+            modelBuilder.Entity("gschatbot.api.Models.EspecialistaPlano", b =>
+                {
+                    b.HasOne("gschatbot.api.Models.Especialista", "Especialista")
+                        .WithMany("PlanosAtendidos")
+                        .HasForeignKey("EspecialistaId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("gschatbot.api.Models.PlanoAssistencia", "PlanoAssistencia")
+                        .WithMany("Especialistas")
+                        .HasForeignKey("PlanoAssistenciaId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Especialista");
+
+                    b.Navigation("PlanoAssistencia");
                 });
 
             modelBuilder.Entity("gschatbot.api.Models.HistoricoMensagem", b =>
@@ -450,17 +601,6 @@ namespace gschatbot.api.Migrations
                     b.Navigation("Especialista");
                 });
 
-            modelBuilder.Entity("gschatbot.api.Models.SessaoConversa", b =>
-                {
-                    b.HasOne("gschatbot.api.Models.Cliente", "Cliente")
-                        .WithOne("Sessao")
-                        .HasForeignKey("gschatbot.api.Models.SessaoConversa", "ClienteId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("Cliente");
-                });
-
             modelBuilder.Entity("gschatbot.api.Models.Agendamento", b =>
                 {
                     b.Navigation("HistoricoMensagens");
@@ -472,13 +612,13 @@ namespace gschatbot.api.Migrations
 
                     b.Navigation("HistoricoMensagens");
 
-                    b.Navigation("Sessao");
+                    b.Navigation("Numeros");
+
+                    b.Navigation("Planos");
                 });
 
             modelBuilder.Entity("gschatbot.api.Models.Endereco", b =>
                 {
-                    b.Navigation("EspecialistasEnderecos");
-
                     b.Navigation("HorariosConsulta");
                 });
 
@@ -491,15 +631,29 @@ namespace gschatbot.api.Migrations
                 {
                     b.Navigation("Agendamentos");
 
-                    b.Navigation("EspecialistasEnderecos");
-
                     b.Navigation("HorariosConsulta");
+
+                    b.Navigation("MetodosPagamento");
+
+                    b.Navigation("PlanosAtendidos");
                 });
 
             modelBuilder.Entity("gschatbot.api.Models.HorarioConsulta", b =>
                 {
                     b.Navigation("Agendamento")
                         .IsRequired();
+                });
+
+            modelBuilder.Entity("gschatbot.api.Models.MetodoPagamento", b =>
+                {
+                    b.Navigation("Especialistas");
+                });
+
+            modelBuilder.Entity("gschatbot.api.Models.PlanoAssistencia", b =>
+                {
+                    b.Navigation("Clientes");
+
+                    b.Navigation("Especialistas");
                 });
 #pragma warning restore 612, 618
         }

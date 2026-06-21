@@ -6,5 +6,6 @@ public interface IEspecialistaRepository
 {
     Task<Especialista?> BuscarPorNomeAsync(string nome);
     Task<List<string>> ListarNomesAtivosAsync();
+    Task<List<Especialista>> ListarAtivosAsync();
     Task<List<Especialista>> ListarPorEspecialidadeAsync(int especialidadeId);
 }

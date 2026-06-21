@@ -15,7 +15,7 @@ public class HorarioConsultaRepository : IHorarioConsultaRepository
         _context = context;
     }
 
-    public async Task<List<SlotDisponivel>> ListarPorEspecialidadeAsync(int especialidadeId, int offset, int quantidade)
+    public async Task<List<SlotDisponivel>> ListarPorEspecialidadeAsync(int especialidadeId, int quantidade)
     {
         var hoje = DateOnly.FromDateTime(DateTime.Today);
 
@@ -26,10 +26,10 @@ public class HorarioConsultaRepository : IHorarioConsultaRepository
                   && h.Status == "disponivel" && h.DataConsulta >= hoje
             orderby h.DataConsulta, h.HoraInicio
             select new SlotDisponivel(h.Id, e.Id, e.Nome, h.DataConsulta, h.HoraInicio)
-        ).Skip(offset).Take(quantidade).ToListAsync();
+        ).Take(quantidade).ToListAsync();
     }
 
-    public async Task<List<SlotDisponivel>> ListarPorEspecialistaAsync(int especialistaId, int offset, int quantidade)
+    public async Task<List<SlotDisponivel>> ListarPorEspecialistaAsync(int especialistaId, int quantidade)
     {
         var hoje = DateOnly.FromDateTime(DateTime.Today);
 
@@ -39,7 +39,7 @@ public class HorarioConsultaRepository : IHorarioConsultaRepository
             where h.EspecialistaId == especialistaId && h.Status == "disponivel" && h.DataConsulta >= hoje
             orderby h.DataConsulta, h.HoraInicio
             select new SlotDisponivel(h.Id, e.Id, e.Nome, h.DataConsulta, h.HoraInicio)
-        ).Skip(offset).Take(quantidade).ToListAsync();
+        ).Take(quantidade).ToListAsync();
     }
 
     public async Task<HorarioConsulta?> BuscarDisponivelComDetalhesAsync(int horarioId)
@@ -48,6 +48,18 @@ public class HorarioConsultaRepository : IHorarioConsultaRepository
             .Include(h => h.Especialista).ThenInclude(e => e.Especialidade)
             .Include(h => h.Endereco)
             .FirstOrDefaultAsync(h => h.Id == horarioId && h.Status == "disponivel");
+    }
+
+    public async Task<HorarioConsulta?> BuscarPorDetalhesAsync(int especialistaId, DateOnly data, TimeOnly hora)
+    {
+        return await _context.HorariosConsulta
+            .Include(h => h.Especialista).ThenInclude(e => e.Especialidade)
+            .Include(h => h.Endereco)
+            .FirstOrDefaultAsync(h =>
+                h.EspecialistaId == especialistaId &&
+                h.DataConsulta == data &&
+                h.HoraInicio == hora &&
+                h.Status == "disponivel");
     }
 
     public async Task ReservarAsync(HorarioConsulta horario)

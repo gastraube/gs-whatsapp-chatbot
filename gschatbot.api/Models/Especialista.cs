@@ -12,7 +12,8 @@ public class Especialista
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
     public Especialidade Especialidade { get; set; }
-    public ICollection<EspecialistaEndereco> EspecialistasEnderecos { get; set; } = new List<EspecialistaEndereco>();
-public ICollection<HorarioConsulta> HorariosConsulta { get; set; } = new List<HorarioConsulta>();
+    public ICollection<EspecialistaPlano> PlanosAtendidos { get; set; } = new List<EspecialistaPlano>();
+    public ICollection<EspecialistaMetodoPagamento> MetodosPagamento { get; set; } = new List<EspecialistaMetodoPagamento>();
+    public ICollection<HorarioConsulta> HorariosConsulta { get; set; } = new List<HorarioConsulta>();
     public ICollection<Agendamento> Agendamentos { get; set; } = new List<Agendamento>();
 }

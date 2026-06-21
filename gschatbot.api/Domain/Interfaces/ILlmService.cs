@@ -8,5 +8,8 @@ public interface ILlmService
         string mensagem,
         List<(string role, string texto)>? historico = null,
         List<string>? especialidades = null,
-        List<string>? especialistas = null);
+        List<string>? especialistas = null,
+        List<string>? planos = null,
+        List<string>? planosCliente = null,
+        Dictionary<string, List<string>>? metodosPagamentoPorEspecialista = null);
 }

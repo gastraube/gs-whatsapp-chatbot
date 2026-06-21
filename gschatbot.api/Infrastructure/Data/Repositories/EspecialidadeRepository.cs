@@ -17,7 +17,7 @@ public class EspecialidadeRepository : IEspecialidadeRepository
     public async Task<Especialidade?> BuscarPorNomeAsync(string nome)
     {
         return await _context.Especialidades
-            .FirstOrDefaultAsync(e => e.Nome.ToLower().Contains(nome.ToLower()));
+            .FirstOrDefaultAsync(e => e.Nome.ToLower().Contains(nome.ToLower()) || nome.ToLower().Contains(e.Nome.ToLower()));
     }
 
     public async Task<List<string>> ListarNomesAsync()

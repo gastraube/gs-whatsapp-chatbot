@@ -15,9 +15,9 @@ public class WhatsAppController : ControllerBase
     private readonly IEspecialidadeRepository _especialidadeRepo;
     private readonly IEspecialistaRepository _especialistaRepo;
     private readonly IHistoricoMensagemRepository _historicoRepo;
-    private readonly ISessaoConversaRepository _sessaoRepo;
+    private readonly IPlanoAssistenciaRepository _planoRepo;
+    private readonly IMetodoPagamentoRepository _metodoPagamentoRepo;
     private readonly IntentDispatcher _intentDispatcher;
-    private readonly IAgendamentoHandler _agendamentoHandler;
     private readonly ILogger<WhatsAppController> _logger;
 
     public WhatsAppController(
@@ -27,9 +27,9 @@ public class WhatsAppController : ControllerBase
         IEspecialidadeRepository especialidadeRepo,
         IEspecialistaRepository especialistaRepo,
         IHistoricoMensagemRepository historicoRepo,
-        ISessaoConversaRepository sessaoRepo,
+        IPlanoAssistenciaRepository planoRepo,
+        IMetodoPagamentoRepository metodoPagamentoRepo,
         IntentDispatcher intentDispatcher,
-        IAgendamentoHandler agendamentoHandler,
         ILogger<WhatsAppController> logger)
     {
         _llmService = llmService;
@@ -38,9 +38,9 @@ public class WhatsAppController : ControllerBase
         _especialidadeRepo = especialidadeRepo;
         _especialistaRepo = especialistaRepo;
         _historicoRepo = historicoRepo;
-        _sessaoRepo = sessaoRepo;
+        _planoRepo = planoRepo;
+        _metodoPagamentoRepo = metodoPagamentoRepo;
         _intentDispatcher = intentDispatcher;
-        _agendamentoHandler = agendamentoHandler;
         _logger = logger;
     }
 
@@ -56,20 +56,6 @@ public class WhatsAppController : ControllerBase
 
             var numeroLimpo = fromNumber.Replace("whatsapp:", "").Replace("+", "").Replace(" ", "");
             var cliente = await _clienteRepo.ObterOuCriarAsync(numeroLimpo);
-            var sessao = await _sessaoRepo.BuscarPorClienteAsync(cliente.Id);
-
-            if (sessao?.EstadoAtual == "aguardando_escolha")
-            {
-                await _historicoRepo.AdicionarAsync(new HistoricoMensagem
-                {
-                    ClienteId = cliente.Id,
-                    RemetenteId = "cliente",
-                    Mensagem = messageBody,
-                    Tipo = "texto"
-                });
-                await _agendamentoHandler.ProcessarEscolhaAsync(cliente.Id, numeroLimpo, messageBody, sessao);
-                return Ok();
-            }
 
             var historico = await _historicoRepo.ListarRecentesAsync(cliente.Id, 10);
             var historicoTuples = historico
@@ -77,9 +63,20 @@ public class WhatsAppController : ControllerBase
                 .ToList();
 
             var especialidades = await _especialidadeRepo.ListarNomesAsync();
-            var especialistas = await _especialistaRepo.ListarNomesAtivosAsync();
+            var nomesEspecialistas = await _especialistaRepo.ListarNomesAtivosAsync();
+            var planos = await _planoRepo.ListarNomesAtivosAsync();
+            var planosCliente = await _planoRepo.ListarPlanosClienteAsync(cliente.Id);
 
-            var llmResponse = await _llmService.ProcessarMensagemAsync(messageBody, historicoTuples, especialidades, especialistas);
+            var todosEspecialistas = await _especialistaRepo.ListarAtivosAsync();
+            var metodosPagamento = new Dictionary<string, List<string>>();
+            foreach (var e in todosEspecialistas)
+            {
+                var metodos = await _metodoPagamentoRepo.ListarNomesPorEspecialistaAsync(e.Id);
+                if (metodos.Count > 0)
+                    metodosPagamento[e.Nome] = metodos;
+            }
+
+            var llmResponse = await _llmService.ProcessarMensagemAsync(messageBody, historicoTuples, especialidades, nomesEspecialistas, planos, planosCliente, metodosPagamento);
 
             await _historicoRepo.AdicionarAsync(new HistoricoMensagem
             {
@@ -88,13 +85,6 @@ public class WhatsAppController : ControllerBase
                 Mensagem = messageBody,
                 Tipo = "texto"
             });
-
-            if (sessao != null)
-            {
-                sessao.EstadoAtual = llmResponse.Intent;
-                sessao.UltimaMensagemEm = DateTime.UtcNow;
-                await _sessaoRepo.AtualizarAsync(sessao);
-            }
 
             var handled = await _intentDispatcher.Dispatch(cliente.Id, numeroLimpo, llmResponse);
 

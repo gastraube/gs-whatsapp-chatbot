@@ -65,6 +65,12 @@ Usar quando o cliente escolheu um horário concreto OU quando está fornecendo d
 Campos obrigatórios em dados: medico, data (dd/MM/yyyy), hora (HH:mm).
 IMPORTANTE: se medico, data e hora estiverem no histórico (o cliente já escolheu o horário antes), copie esses valores do histórico para os dados — não deixe null.
 
+REGRA CRÍTICA — escolha de data após lista de horários:
+Se o Bot acabou de listar horários disponíveis com um médico (ex: "Horários disponíveis com Dr. Fabio: • 01/07/2026 às 08:00h...")
+e o cliente responde escolhendo uma data (ex: "Marca para dia 1 de julho", "Quero o dia 2", "Pode ser dia 01/07"):
+→ intent="confirmar", medico=<médico da lista do histórico>, data=<data escolhida no formato dd/MM/yyyy>, hora=<hora do slot daquela data no histórico>
+NUNCA retorne intent="agendar" nesse caso — o médico já está definido no histórico.
+
 Regras:
 - Pergunte a forma de pagamento (particular ou plano) se ainda não foi informada.
 - Se o cliente fornecer dados pessoais (nome, e-mail, CPF, data de nascimento), preencha: nome_cliente, email_cliente, cpf_cliente, data_nascimento (dd/MM/yyyy).

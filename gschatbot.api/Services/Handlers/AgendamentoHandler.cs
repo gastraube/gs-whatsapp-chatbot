@@ -12,6 +12,7 @@ public class AgendamentoHandler : IIntentHandler
     private readonly IEspecialistaRepository _especialistaRepo;
     private readonly IEspecialidadeRepository _especialidadeRepo;
     private readonly INotificacaoService _notificacao;
+    private readonly IHistoricoMensagemRepository _historicoRepo;
     private readonly ILogger<AgendamentoHandler> _logger;
 
     public AgendamentoHandler(
@@ -19,12 +20,14 @@ public class AgendamentoHandler : IIntentHandler
         IEspecialistaRepository especialistaRepo,
         IEspecialidadeRepository especialidadeRepo,
         INotificacaoService notificacao,
+        IHistoricoMensagemRepository historicoRepo,
         ILogger<AgendamentoHandler> logger)
     {
         _horarioRepo = horarioRepo;
         _especialistaRepo = especialistaRepo;
         _especialidadeRepo = especialidadeRepo;
         _notificacao = notificacao;
+        _historicoRepo = historicoRepo;
         _logger = logger;
     }
 
@@ -39,17 +42,17 @@ public class AgendamentoHandler : IIntentHandler
 
             if (tipo == "especialidade")
             {
-                await ListarEspecialistasAsync(numeroWhatsApp, especialidadeNome);
+                await ListarEspecialistasAsync(clienteId, numeroWhatsApp, especialidadeNome);
                 return;
             }
 
             if (tipo == "medico")
             {
-                await ListarHorariosMedicoAsync(numeroWhatsApp, medicoNome);
+                await ListarHorariosMedicoAsync(clienteId, numeroWhatsApp, medicoNome);
                 return;
             }
 
-            await _notificacao.EnviarMensagemAsync(numeroWhatsApp, llmResponse.Resposta);
+            await EnviarESalvarAsync(clienteId, numeroWhatsApp, llmResponse.Resposta);
         }
         catch (Exception ex)
         {
@@ -58,58 +61,70 @@ public class AgendamentoHandler : IIntentHandler
         }
     }
 
-    private async Task ListarEspecialistasAsync(string numeroWhatsApp, string? especialidadeNome)
+    private async Task ListarEspecialistasAsync(int clienteId, string numeroWhatsApp, string? especialidadeNome)
     {
         if (string.IsNullOrEmpty(especialidadeNome))
         {
-            await _notificacao.EnviarMensagemAsync(numeroWhatsApp, "Qual especialidade você deseja?");
+            await EnviarESalvarAsync(clienteId, numeroWhatsApp, "Qual especialidade você deseja?");
             return;
         }
 
         var especialidade = await _especialidadeRepo.BuscarPorNomeAsync(especialidadeNome);
         if (especialidade == null)
         {
-            await _notificacao.EnviarMensagemAsync(numeroWhatsApp, $"Não encontrei a especialidade '{especialidadeNome}'. Pode verificar o nome?");
+            await EnviarESalvarAsync(clienteId, numeroWhatsApp, $"Não encontrei a especialidade '{especialidadeNome}'. Pode verificar o nome?");
             return;
         }
 
         var especialistas = await _especialistaRepo.ListarPorEspecialidadeAsync(especialidade.Id);
         if (especialistas.Count == 0)
         {
-            await _notificacao.EnviarMensagemAsync(numeroWhatsApp, $"Não há médicos disponíveis para {especialidade.Nome} no momento.");
+            await EnviarESalvarAsync(clienteId, numeroWhatsApp, $"Não há médicos disponíveis para {especialidade.Nome} no momento.");
             return;
         }
 
         var linhas = especialistas.Select(e => $"  • {e.Nome}");
         var mensagem = $"Médicos disponíveis em {especialidade.Nome}:\n\n{string.Join("\n", linhas)}\n\nQual prefere?";
-        await _notificacao.EnviarMensagemAsync(numeroWhatsApp, mensagem);
+        await EnviarESalvarAsync(clienteId, numeroWhatsApp, mensagem);
     }
 
-    private async Task ListarHorariosMedicoAsync(string numeroWhatsApp, string? medicoNome)
+    private async Task ListarHorariosMedicoAsync(int clienteId, string numeroWhatsApp, string? medicoNome)
     {
         if (string.IsNullOrEmpty(medicoNome))
         {
-            await _notificacao.EnviarMensagemAsync(numeroWhatsApp, "Qual médico você deseja?");
+            await EnviarESalvarAsync(clienteId, numeroWhatsApp, "Qual médico você deseja?");
             return;
         }
 
         var especialista = await _especialistaRepo.BuscarPorNomeAsync(medicoNome);
         if (especialista == null)
         {
-            await _notificacao.EnviarMensagemAsync(numeroWhatsApp, $"Não encontrei nenhum médico chamado '{medicoNome}'. Verifique o nome ou me diga a especialidade desejada.");
+            await EnviarESalvarAsync(clienteId, numeroWhatsApp, $"Não encontrei nenhum médico chamado '{medicoNome}'. Verifique o nome ou me diga a especialidade desejada.");
             return;
         }
 
         var slots = await _horarioRepo.ListarPorEspecialistaAsync(especialista.Id, PageSize);
         if (slots.Count == 0)
         {
-            await _notificacao.EnviarMensagemAsync(numeroWhatsApp, $"Não há horários disponíveis com {especialista.Nome} no momento.");
+            await EnviarESalvarAsync(clienteId, numeroWhatsApp, $"Não há horários disponíveis com {especialista.Nome} no momento.");
             return;
         }
 
         var linhas = slots.Select(x => $"  • {x.DataConsulta:dd/MM/yyyy} às {x.HoraInicio:HH:mm}h");
         var mensagem = $"Horários disponíveis com {especialista.Nome}:\n\n{string.Join("\n", linhas)}\n\nQual prefere?";
+        await EnviarESalvarAsync(clienteId, numeroWhatsApp, mensagem);
+    }
+
+    private async Task EnviarESalvarAsync(int clienteId, string numeroWhatsApp, string mensagem)
+    {
         await _notificacao.EnviarMensagemAsync(numeroWhatsApp, mensagem);
+        await _historicoRepo.AdicionarAsync(new HistoricoMensagem
+        {
+            ClienteId = clienteId,
+            RemetenteId = "bot",
+            Mensagem = mensagem,
+            Tipo = "texto"
+        });
     }
 
     private static string? InferirTipo(Dictionary<string, object> dados)

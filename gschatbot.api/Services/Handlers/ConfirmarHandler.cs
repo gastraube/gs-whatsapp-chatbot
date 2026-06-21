@@ -54,21 +54,21 @@ public class ConfirmarHandler : IIntentHandler
 
             if (string.IsNullOrEmpty(medicoNome) || string.IsNullOrEmpty(dataStr) || string.IsNullOrEmpty(horaStr))
             {
-                await _notificacao.EnviarMensagemAsync(numeroWhatsApp, llmResponse.Resposta);
+                await EnviarESalvarAsync(clienteId, numeroWhatsApp, llmResponse.Resposta);
                 return;
             }
 
             if (!DateOnly.TryParseExact(dataStr, "dd/MM/yyyy", CultureInfo.InvariantCulture, DateTimeStyles.None, out var data) ||
                 !TimeOnly.TryParseExact(horaStr, "HH:mm", CultureInfo.InvariantCulture, DateTimeStyles.None, out var hora))
             {
-                await _notificacao.EnviarMensagemAsync(numeroWhatsApp, "Não consegui identificar a data ou hora. Pode confirmar qual horário você escolheu?");
+                await EnviarESalvarAsync(clienteId, numeroWhatsApp, "Não consegui identificar a data ou hora. Pode confirmar qual horário você escolheu?");
                 return;
             }
 
             var especialista = await _especialistaRepo.BuscarPorNomeAsync(medicoNome);
             if (especialista == null)
             {
-                await _notificacao.EnviarMensagemAsync(numeroWhatsApp, $"Não encontrei o médico '{medicoNome}'. Pode tentar novamente?");
+                await EnviarESalvarAsync(clienteId, numeroWhatsApp, $"Não encontrei o médico '{medicoNome}'. Pode tentar novamente?");
                 return;
             }
 
@@ -98,7 +98,7 @@ public class ConfirmarHandler : IIntentHandler
 
             if (faltando.Count > 0)
             {
-                await _notificacao.EnviarMensagemAsync(numeroWhatsApp,
+                await EnviarESalvarAsync(clienteId, numeroWhatsApp,
                     $"Para confirmar o agendamento preciso de alguns dados: {string.Join(", ", faltando)}.");
                 return;
             }
@@ -109,14 +109,14 @@ public class ConfirmarHandler : IIntentHandler
                 plano = await _planoRepo.BuscarPorNomeAsync(planoNome);
                 if (plano == null)
                 {
-                    await _notificacao.EnviarMensagemAsync(numeroWhatsApp, $"Não encontrei o plano '{planoNome}'. Pode verificar o nome ou prefere pagar particular?");
+                    await EnviarESalvarAsync(clienteId, numeroWhatsApp, $"Não encontrei o plano '{planoNome}'. Pode verificar o nome ou prefere pagar particular?");
                     return;
                 }
 
                 var aceitaPlano = await _planoRepo.EspecialistaAceitaPlanoAsync(especialista.Id, plano.Id);
                 if (!aceitaPlano)
                 {
-                    await _notificacao.EnviarMensagemAsync(numeroWhatsApp, $"{especialista.Nome} não atende pelo plano {plano.Nome}. Gostaria de agendar como particular?");
+                    await EnviarESalvarAsync(clienteId, numeroWhatsApp, $"{especialista.Nome} não atende pelo plano {plano.Nome}. Gostaria de agendar como particular?");
                     return;
                 }
             }
@@ -124,7 +124,7 @@ public class ConfirmarHandler : IIntentHandler
             var slot = await _horarioRepo.BuscarPorDetalhesAsync(especialista.Id, data, hora);
             if (slot == null)
             {
-                await _notificacao.EnviarMensagemAsync(numeroWhatsApp, "Esse horário não está mais disponível. Gostaria de ver outros horários?");
+                await EnviarESalvarAsync(clienteId, numeroWhatsApp, "Esse horário não está mais disponível. Gostaria de ver outros horários?");
                 return;
             }
 
@@ -168,5 +168,17 @@ public class ConfirmarHandler : IIntentHandler
             _logger.LogError(ex, "[ConfirmarHandler] Erro ao confirmar agendamento");
             await _notificacao.EnviarMensagemAsync(numeroWhatsApp, "Erro ao confirmar o agendamento. Tente novamente.");
         }
+    }
+
+    private async Task EnviarESalvarAsync(int clienteId, string numeroWhatsApp, string mensagem)
+    {
+        await _notificacao.EnviarMensagemAsync(numeroWhatsApp, mensagem);
+        await _historicoRepo.AdicionarAsync(new HistoricoMensagem
+        {
+            ClienteId = clienteId,
+            RemetenteId = "bot",
+            Mensagem = mensagem,
+            Tipo = "texto"
+        });
     }
 }
